@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../supabaseClient';
+import { useNavigate } from 'react-router-dom';
 
 interface Message {
   id: string;
@@ -11,61 +12,54 @@ interface Message {
   };
 }
 
-interface DatabaseUser {
-  id: string;
-  email: string;
-}
-
-interface DatabaseMessage {
-  id: string;
-  content: string;
-  created_at: string;
-  user_id: string;
-  user: DatabaseUser;
-}
-
-interface SupabaseMessage {
-  id: string;
-  content: string;
-  created_at: string;
-  user_id: string;
-  user: DatabaseUser[];
-}
-
-const ServerChat: React.FC<{
-  channelId: string;
-  userId: string;
-  channelName: string;
-}> = ({ channelId, userId, channelName }) => {
+const ServerChat: React.FC<{ channelId: string; userId: string; channelName: string }> = ({
+  channelId,
+  userId,
+  channelName,
+}) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
+    const checkUserSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/login');
+      }
+    };
+
+    checkUserSession();
     fetchMessages();
     scrollToBottom();
 
     const subscription = supabase
-      .channel('server_messages')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'server_messages', filter: `channel_id=eq.${channelId}` },
-        fetchMessages
+      .channel(`server_messages_${channelId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'server_messages', filter: `channel_id=eq.${channelId}` },
+        (payload) => {
+          if (payload.new) {
+            addNewMessage(payload.new);
+          }
+        }
       )
       .subscribe();
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [channelId]);
+  }, [channelId, navigate]);
 
   const fetchMessages = async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('server_messages')
-        .select(`
+        .select(` 
           id,
           content,
           created_at,
@@ -80,14 +74,14 @@ const ServerChat: React.FC<{
 
       if (error) throw error;
 
-      const formattedMessages: Message[] = (data || []).map(msg => ({
+      const formattedMessages: Message[] = (data || []).map((msg) => ({
         id: msg.id,
         content: msg.content,
         created_at: msg.created_at,
         user: {
           id: msg.profiles.id,
-          email: msg.profiles.email
-        }
+          email: msg.profiles.email.split('@')[0], // E-posta adresinden ismi almak için
+        },
       }));
 
       setMessages(formattedMessages);
@@ -99,64 +93,41 @@ const ServerChat: React.FC<{
     }
   };
 
+  const addNewMessage = async (newMsg: any) => {
+    // Kullanıcı bilgilerini güncelle
+    const { data: { session } } = await supabase.auth.getSession();
+    const email = session ? session.user.email.split('@')[0] : 'Bilinmeyen Kullanıcı'; // Kullanıcı oturumunu kontrol et
+
+    setMessages((prevMessages) => [
+      ...prevMessages,
+      {
+        id: newMsg.id,
+        content: newMsg.content,
+        created_at: newMsg.created_at,
+        user: {
+          id: newMsg.user_id,
+          email: email,
+        },
+      },
+    ]);
+    scrollToBottom();
+  };
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
     try {
-      // Önce kanalın var olduğunu kontrol edelim
-      const { data: channel, error: channelError } = await supabase
-        .from('channels')
-        .select('*')
-        .eq('id', channelId)
-        .single();
-
-      if (channelError) {
-        throw new Error('Kanal bulunamadı. Mesaj gönderilemedi.');
-      }
-
-      // Kullanıcı profilini kontrol et ve yoksa oluştur
-      const { data: userProfile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError) {
-        // Profil yoksa oluştur
-        const { data: authUser, error: authError } = await supabase.auth.getUser();
-        
-        if (authError) {
-          throw new Error('Kullanıcı bilgileri alınamadı.');
-        }
-
-        const { error: insertError } = await supabase
-          .from('profiles')
-          .insert([
-            {
-              id: userId,
-              email: authUser.user.email
-            }
-          ]);
-
-        if (insertError) {
-          throw new Error('Profil oluşturulamadı.');
-        }
-      }
-
-      const { error } = await supabase
-        .from('server_messages')
-        .insert([
-          {
-            channel_id: channelId,
-            user_id: userId,
-            content: newMessage.trim()
-          }
-        ]);
+      const { error } = await supabase.from('server_messages').insert([
+        {
+          channel_id: channelId,
+          user_id: userId,
+          content: newMessage.trim(),
+        },
+      ]);
 
       if (error) throw error;
       setNewMessage('');
-      scrollToBottom();
     } catch (error: any) {
       setError(error.message);
       console.error('Error sending message:', error);
@@ -164,7 +135,9 @@ const ServerChat: React.FC<{
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   };
 
   return (
@@ -179,7 +152,7 @@ const ServerChat: React.FC<{
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           </div>
         ) : (
-          messages.map(message => (
+          messages.map((message) => (
             <div
               key={message.id}
               className={`flex ${message.user.id === userId ? 'justify-end' : 'justify-start'}`}
@@ -187,7 +160,11 @@ const ServerChat: React.FC<{
               <div className="max-w-[70%]">
                 <div className="flex items-center space-x-2 mb-1">
                   <span className="text-xs text-gray-500">
-                    {message.user.email} • {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {message.user.email} •{' '}
+                    {new Date(message.created_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </span>
                 </div>
                 <div
@@ -233,4 +210,4 @@ const ServerChat: React.FC<{
   );
 };
 
-export default ServerChat; 
+export default ServerChat;

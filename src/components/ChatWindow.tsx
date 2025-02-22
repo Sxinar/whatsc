@@ -5,6 +5,7 @@ interface Message {
   id: string;
   content: string;
   sender_id: string;
+  receiver_id: string;
   created_at: string;
 }
 
@@ -22,8 +23,16 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
     scrollToBottom();
 
     const subscription = supabase
-      .channel('messages')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, fetchMessages)
+      .channel(`chat_${chatId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          if (payload.new) {
+            addNewMessage(payload.new);
+          }
+        }
+      )
       .subscribe();
 
     return () => {
@@ -35,7 +44,9 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
     const { data, error } = await supabase
       .from('messages')
       .select('*')
-      .or(`and(sender_id.eq.${userId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${userId})`)
+      .or(
+        `and(sender_id.eq.${userId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${userId})`
+      )
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -46,17 +57,26 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
     setMessages(data || []);
   };
 
+  const addNewMessage = (newMsg: any) => {
+    setMessages((prevMessages) => [...prevMessages, newMsg]);
+    scrollToBottom();
+  };
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
-    const { error } = await supabase.from('messages').insert([
-      {
-        content: newMessage,
-        sender_id: userId,
-        receiver_id: otherUserId,
-      },
-    ]);
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([
+        {
+          content: newMessage,
+          sender_id: userId,
+          receiver_id: otherUserId,
+        },
+      ])
+      .select()
+      .single();
 
     if (error) {
       console.error('Error sending message:', error);
@@ -64,6 +84,9 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
     }
 
     setNewMessage('');
+    if (data) {
+      addNewMessage(data);
+    }
   };
 
   const scrollToBottom = () => {
@@ -80,9 +103,7 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
           >
             <div
               className={`max-w-xs md:max-w-md p-3 rounded-lg ${
-                message.sender_id === userId
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-200 text-gray-800'
+                message.sender_id === userId ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'
               }`}
             >
               {message.content}
@@ -112,4 +133,4 @@ const ChatWindow: React.FC<{ chatId: string; userId: string; otherUserId: string
   );
 };
 
-export default ChatWindow; 
+export default ChatWindow;
