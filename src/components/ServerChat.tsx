@@ -79,10 +79,10 @@ const ServerChat: React.FC<{ channelId: string; userId: string; channelName: str
         content: msg.content,
         created_at: msg.created_at,
         user: {
-          id: msg.profiles.id,
-          email: msg.profiles.email.split('@')[0], // E-posta adresinden ismi almak için
+          id: msg.profiles?.id || msg.profiles?.[0]?.id || 'unknown', // Eğer array ise ilk elemanı al
+          email: msg.profiles?.email?.split('@')[0] || msg.profiles?.[0]?.email?.split('@')[0] || 'Bilinmeyen Kullanıcı',
         },
-      }));
+      }));      
 
       setMessages(formattedMessages);
     } catch (error: any) {
