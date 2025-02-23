@@ -26,7 +26,9 @@ const ServerChat: React.FC<{ channelId: string; userId: string; channelName: str
 
   useEffect(() => {
     const checkUserSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         navigate('/login');
       }
@@ -59,7 +61,7 @@ const ServerChat: React.FC<{ channelId: string; userId: string; channelName: str
     try {
       const { data, error } = await supabase
         .from('server_messages')
-        .select(` 
+        .select(`
           id,
           content,
           created_at,
@@ -74,15 +76,16 @@ const ServerChat: React.FC<{ channelId: string; userId: string; channelName: str
 
       if (error) throw error;
 
-      const formattedMessages: Message[] = (data || []).map((msg) => ({
+      const formattedMessages: Message[] = (data || []).map((msg: any) => ({
         id: msg.id,
         content: msg.content,
         created_at: msg.created_at,
         user: {
-          id: msg.profiles?.id || msg.profiles?.[0]?.id || 'unknown', // Eğer array ise ilk elemanı al
-          email: msg.profiles?.email?.split('@')[0] || msg.profiles?.[0]?.email?.split('@')[0] || 'Bilinmeyen Kullanıcı',
+          // profiles dizisi geliyorsa ilk elemanı kullanıyoruz
+          id: msg.profiles?.[0]?.id || 'unknown',
+          email: msg.profiles?.[0]?.email?.split('@')[0] || 'Bilinmeyen Kullanıcı',
         },
-      }));      
+      }));
 
       setMessages(formattedMessages);
     } catch (error: any) {
@@ -94,9 +97,10 @@ const ServerChat: React.FC<{ channelId: string; userId: string; channelName: str
   };
 
   const addNewMessage = async (newMsg: any) => {
-    // Kullanıcı bilgilerini güncelle
-    const { data: { session } } = await supabase.auth.getSession();
-    const email = session ? session.user.email.split('@')[0] : 'Bilinmeyen Kullanıcı'; // Kullanıcı oturumunu kontrol et
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const email = session?.user?.email ? session.user.email.split('@')[0] : 'Bilinmeyen Kullanıcı';
 
     setMessages((prevMessages) => [
       ...prevMessages,
